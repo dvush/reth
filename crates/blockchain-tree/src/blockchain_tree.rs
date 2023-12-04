@@ -1106,8 +1106,8 @@ impl<DB: Database, EF: ExecutorFactory> BlockchainTree<DB, EF> {
     /// Write the given chain to the database as canonical.
     fn commit_canonical_to_database(&self, chain: Chain) -> RethResult<()> {
         // Compute state root before opening write transaction.
-        let hashed_state = chain.state().hash_state_slow();
         let start = std::time::Instant::now();
+        let hashed_state = chain.state().hash_state_slow();
         let (state_root, trie_updates) = chain
             .state()
             .state_root_calculator(
