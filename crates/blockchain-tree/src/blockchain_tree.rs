@@ -1107,6 +1107,7 @@ impl<DB: Database, EF: ExecutorFactory> BlockchainTree<DB, EF> {
     fn commit_canonical_to_database(&self, chain: Chain) -> RethResult<()> {
         // Compute state root before opening write transaction.
         let hashed_state = chain.state().hash_state_slow();
+        let start = std::time::Instant::now();
         let (state_root, trie_updates) = chain
             .state()
             .state_root_calculator(
@@ -1115,6 +1116,12 @@ impl<DB: Database, EF: ExecutorFactory> BlockchainTree<DB, EF> {
             )
             .root_with_updates()
             .map_err(Into::<DatabaseError>::into)?;
+        let dutarion_ms = start.elapsed().as_millis();
+        info!(
+            target: "blockchain_tree",
+            "Computed state root in {} ms",
+            dutarion_ms
+        );
         let tip = chain.tip();
         if state_root != tip.state_root {
             return Err(RethError::Provider(ProviderError::StateRootMismatch(Box::new(
