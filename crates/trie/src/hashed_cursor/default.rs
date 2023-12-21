@@ -4,6 +4,7 @@ use reth_db::{
     tables,
     transaction::DbTx,
 };
+use reth_interfaces::db::DatabaseError;
 use reth_primitives::{Account, StorageEntry, B256};
 
 impl<'a, TX: DbTx> HashedCursorFactory for &'a TX {
@@ -29,6 +30,10 @@ where
 
     fn next(&mut self) -> Result<Option<(B256, Account)>, reth_db::DatabaseError> {
         self.next()
+    }
+
+    fn current(&mut self) -> Result<Option<(B256, Account)>, DatabaseError> {
+        self.current()
     }
 }
 

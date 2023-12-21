@@ -159,7 +159,7 @@ impl BundleStateWithReceipts {
         &self,
         tx: &'a TX,
         hashed_post_state: &'b HashedPostState,
-    ) -> StateRoot<&'a TX, HashedPostStateCursorFactory<'a, 'b, TX>> {
+    ) -> StateRoot<&'a TX, HashedPostStateCursorFactory<'b, &'a TX>> {
         let (account_prefix_set, storage_prefix_set) = hashed_post_state.construct_prefix_sets();
         let hashed_cursor_factory = HashedPostStateCursorFactory::new(tx, hashed_post_state);
         StateRoot::from_tx(tx)
