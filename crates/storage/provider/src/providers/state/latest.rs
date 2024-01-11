@@ -119,6 +119,11 @@ impl<TX: DbTx> LatestStateProvider<TX> {
     fn as_ref(&self) -> LatestStateProviderRef<'_, TX> {
         LatestStateProviderRef::new(&self.db)
     }
+
+    /// Consume the provider and return the underlying `TX`
+    pub fn into_tx(self) -> TX {
+        self.db
+    }
 }
 
 // Delegates all provider impls to [LatestStateProviderRef]
