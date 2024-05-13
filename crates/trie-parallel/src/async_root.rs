@@ -142,10 +142,13 @@ where
             let storage_root_cache = self.storage_root_cache.clone();
             let handle =
                 self.blocking_pool.spawn_fifo(move || -> Result<_, AsyncStateRootError> {
+                    let mut read_from_cache = false;
+                    let mut wrote_to_cache = false;
                     if let Some(cache) = &storage_root_cache {
                         let key = hashed_state_sorted.fast_unique_hash_account(hashed_address);
                         if let Some(res) = cache.get(key) {
-                            return Ok(res);
+                            read_from_cache = true;
+                            return Ok((res, read_from_cache, wrote_to_cache));
                         }
                     }
 
@@ -163,9 +166,10 @@ where
                     if let Some(cache) = &storage_root_cache {
                         let key = hashed_state_sorted.fast_unique_hash_account(hashed_address);
                         cache.set(key, res.clone());
+                        wrote_to_cache = true;
                     }
 
-                    Ok(res)
+                    Ok((res, read_from_cache, wrote_to_cache))
                 });
             storage_roots.insert(hashed_address, handle);
         }
@@ -196,9 +200,18 @@ where
                 }
                 AccountNode::Leaf(hashed_address, account) => {
                     let (storage_root, _, updates) = match storage_roots.remove(&hashed_address) {
-                        Some(rx) => rx.await.map_err(|_| {
-                            AsyncStateRootError::StorageRootChannelClosed { hashed_address }
-                        })??,
+                        Some(rx) => {
+                            let (res, read_from_cache, wrote_to_cache) = rx.await.map_err(|_| {
+                                AsyncStateRootError::StorageRootChannelClosed { hashed_address }
+                            })??;
+                            if read_from_cache {
+                                tracker.inc_cached_storage_roots_read();
+                            }
+                            if wrote_to_cache {
+                                tracker.inc_cached_storage_roots_written();
+                            }
+                            res
+                        },
                         // Since we do not store all intermediate nodes in the database, there might
                         // be a possibility of re-adding a non-modified leaf to the hash builder.
                         None => {
@@ -247,6 +260,8 @@ where
             leaves_added = stats.leaves_added(),
             missed_leaves = stats.missed_leaves(),
             precomputed_storage_roots = stats.precomputed_storage_roots(),
+            cached_storage_roots_read = stats.cached_storage_roots_read(),
+            cached_storage_roots_written = stats.cached_storage_roots_written(),
             "calculated state root"
         );
 
