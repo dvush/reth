@@ -145,13 +145,13 @@ where
                 self.blocking_pool.spawn_fifo(move || -> Result<_, AsyncStateRootError> {
                     let mut read_from_cache = false;
                     let mut wrote_to_cache = false;
-                    if let Some(cache) = &storage_root_cache {
-                        let key = hashed_state_sorted.fast_unique_hash_account(hashed_address);
-                        if let Some(res) = cache.get(key) {
-                            read_from_cache = true;
-                            return Ok((res, read_from_cache, wrote_to_cache));
-                        }
-                    }
+                    // if let Some(cache) = &storage_root_cache {
+                    //     let key = hashed_state_sorted.fast_unique_hash_account(hashed_address);
+                    //     if let Some(res) = cache.get(key) {
+                    //         read_from_cache = true;
+                    //         return Ok((res, read_from_cache, wrote_to_cache));
+                    //     }
+                    // }
 
                     let provider = view.provider_ro()?;
                     let res = StorageRoot::new_hashed(
@@ -164,11 +164,11 @@ where
                     .with_prefix_set(prefix_set)
                     .calculate(retain_updates)?;
 
-                    if let Some(cache) = &storage_root_cache {
-                        let key = hashed_state_sorted.fast_unique_hash_account(hashed_address);
-                        cache.set(key, res.clone());
-                        wrote_to_cache = true;
-                    }
+                    // if let Some(cache) = &storage_root_cache {
+                    //     let key = hashed_state_sorted.fast_unique_hash_account(hashed_address);
+                    //     cache.set(key, res.clone());
+                    //     wrote_to_cache = true;
+                    // }
 
                     Ok((res, read_from_cache, wrote_to_cache))
                 });
