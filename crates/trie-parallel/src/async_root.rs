@@ -12,6 +12,7 @@ use reth_tasks::pool::BlockingTaskPool;
 use reth_trie::{hashed_cursor::HashedPostStateCursorFactory, node_iter::{AccountNode, AccountNodeIter}, trie_cursor::TrieCursorFactory, updates::TrieUpdates, walker::TrieWalker, HashedPostState, StorageRoot, HashedStorageSorted};
 use std::{collections::HashMap, sync::Arc};
 use std::sync::Mutex;
+use std::time::Instant;
 use thiserror::Error;
 use tracing::*;
 use reth_trie::prefix_set::PrefixSet;
@@ -193,14 +194,27 @@ where
                 .map_err(ProviderError::Database)?;
 
         let mut account_rlp = Vec::with_capacity(128);
-        while let Some(node) = account_node_iter.try_next().map_err(ProviderError::Database)? {
+        let mut iter_next_duration = std::time::Duration::default();
+        let mut branch_duration = std::time::Duration::default();
+        let mut leaf_duration = std::time::Duration::default();
+        let mut missing_leaf_duration = std::time::Duration::default();
+        let mut par_leaf_duration = std::time::Duration::default();
+        while let Some((node, wait)) = {
+            let start = Instant::now();
+            account_node_iter.try_next().map_err(ProviderError::Database)?.map(|v| (v, start.elapsed()))
+        } {
+            iter_next_duration += wait;
             match node {
                 AccountNode::Branch(node) => {
+                    let start = Instant::now();
                     hash_builder.add_branch(node.key, node.value, node.children_are_in_trie);
+                    branch_duration += start.elapsed();
                 }
                 AccountNode::Leaf(hashed_address, account) => {
+                    let start = Instant::now();
                     let (storage_root, _, updates) = match storage_roots.remove(&hashed_address) {
                         Some(rx) => {
+                            let start = Instant::now();
                             let (res, read_from_cache, wrote_to_cache) = rx.await.map_err(|_| {
                                 AsyncStateRootError::StorageRootChannelClosed { hashed_address }
                             })??;
@@ -210,20 +224,24 @@ where
                             if wrote_to_cache {
                                 tracker.inc_cached_storage_roots_written();
                             }
+                            par_leaf_duration += start.elapsed();
                             res
                         },
                         // Since we do not store all intermediate nodes in the database, there might
                         // be a possibility of re-adding a non-modified leaf to the hash builder.
                         None => {
+                            let start = Instant::now();
                             tracker.inc_missed_leaves();
-                            StorageRoot::new_hashed(
+                            let res = StorageRoot::new_hashed(
                                 trie_cursor_factory,
                                 hashed_cursor_factory.clone(),
                                 hashed_address,
                                 #[cfg(feature = "metrics")]
                                 self.metrics.storage_trie.clone(),
                             )
-                            .calculate(retain_updates)?
+                            .calculate(retain_updates)?;
+                            missing_leaf_duration += start.elapsed();
+                            res
                         }
                     };
 
@@ -235,6 +253,7 @@ where
                     let account = TrieAccount::from((account, storage_root));
                     account.encode(&mut account_rlp as &mut dyn BufMut);
                     hash_builder.add_leaf(Nibbles::unpack(hashed_address), &account_rlp);
+                    leaf_duration += start.elapsed();
                 }
             }
         }
@@ -262,6 +281,11 @@ where
             precomputed_storage_roots = stats.precomputed_storage_roots(),
             cached_storage_roots_read = stats.cached_storage_roots_read(),
             cached_storage_roots_written = stats.cached_storage_roots_written(),
+            iter_next_duration_ms = iter_next_duration.as_millis(),
+            branch_duration_ms = branch_duration.as_millis(),
+            leaf_duration_ms = leaf_duration.as_millis(),
+            missing_leaf_duration_ms = missing_leaf_duration.as_millis(),
+            par_leaf_duration_ms = par_leaf_duration.as_millis(),
             "calculated state root"
         );
 
