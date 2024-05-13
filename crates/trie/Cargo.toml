@@ -36,6 +36,8 @@ metrics = { workspace = true, optional = true }
 # `test-utils` feature
 triehash = { version = "0.8", optional = true }
 
+ahash = "0.8.11"
+
 [dev-dependencies]
 # reth
 reth-primitives = { workspace = true, features = ["test-utils", "arbitrary"] }

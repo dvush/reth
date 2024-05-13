@@ -21,6 +21,7 @@ use std::{
     collections::{hash_map, HashMap, HashSet},
     ops::RangeInclusive,
 };
+use std::hash::{Hash, Hasher};
 
 /// Representation of in-memory hashed state.
 #[derive(PartialEq, Eq, Clone, Default, Debug)]
@@ -320,6 +321,26 @@ pub struct HashedStorageSorted {
     pub(crate) zero_valued_slots: HashSet<B256>,
     /// Flag indicating hether the storage was wiped or not.
     pub(crate) wiped: bool,
+}
+
+impl HashedPostStateSorted {
+    /// Calculates ahash for the given account state
+    pub fn fast_unique_hash_account(&self, account: B256) -> u64 {
+        let mut hasher = ahash::AHasher::default();
+        account.hash(&mut hasher);
+        if let Some((_, account)) = self.accounts.iter().find(|(k, _)| k == &account) {
+            account.hash(&mut hasher);
+        }
+        self.destroyed_accounts.contains(&account).hash(&mut hasher);
+        if let Some(storage) = self.storages.get(&account) {
+            storage.non_zero_valued_slots.hash(&mut hasher);
+            let mut sorted_zero_value_slots = storage.zero_valued_slots.iter().collect::<Vec<_>>();
+            sorted_zero_value_slots.sort();
+            sorted_zero_value_slots.hash(&mut hasher);
+            storage.wiped.hash(&mut hasher);
+        }
+        hasher.finish()
+    }
 }
 
 #[cfg(test)]

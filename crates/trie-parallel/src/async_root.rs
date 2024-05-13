@@ -9,20 +9,42 @@ use reth_primitives::{
 };
 use reth_provider::{providers::ConsistentDbView, DatabaseProviderFactory, ProviderError};
 use reth_tasks::pool::BlockingTaskPool;
-use reth_trie::{
-    hashed_cursor::HashedPostStateCursorFactory,
-    node_iter::{AccountNode, AccountNodeIter},
-    trie_cursor::TrieCursorFactory,
-    updates::TrieUpdates,
-    walker::TrieWalker,
-    HashedPostState, StorageRoot,
-};
+use reth_trie::{hashed_cursor::HashedPostStateCursorFactory, node_iter::{AccountNode, AccountNodeIter}, trie_cursor::TrieCursorFactory, updates::TrieUpdates, walker::TrieWalker, HashedPostState, StorageRoot, HashedStorageSorted};
 use std::{collections::HashMap, sync::Arc};
+use std::sync::Mutex;
 use thiserror::Error;
 use tracing::*;
+use reth_trie::prefix_set::PrefixSet;
 
 #[cfg(feature = "metrics")]
 use crate::metrics::ParallelStateRootMetrics;
+
+#[derive(Debug, Clone)]
+pub struct StorageRootCache {
+    account_hash_results: Arc<Mutex<HashMap<u64, (B256, usize, TrieUpdates)>>>,
+}
+
+impl Default for StorageRootCache {
+    fn default() -> Self {
+        Self {
+            account_hash_results: Arc::new(Mutex::new(HashMap::new())),
+        }
+    }
+}
+
+impl StorageRootCache {
+    fn get(&self, key: u64) -> Option<(B256, usize, TrieUpdates)> {
+        self.account_hash_results.lock().unwrap().get(&key).cloned()
+    }
+
+    fn set(&self, key: u64, value: (B256, usize, TrieUpdates)) {
+        if let Some((stored_hash, _, _)) = self.account_hash_results.lock().unwrap().get(&key) {
+            assert_eq!(*stored_hash, value.0, "cached hash mismatch");
+            return;
+        }
+        self.account_hash_results.lock().unwrap().insert(key, value);
+    }
+}
 
 /// Async state root calculator.
 ///
@@ -48,6 +70,8 @@ pub struct AsyncStateRoot<DB, Provider> {
     /// Parallel state root metrics.
     #[cfg(feature = "metrics")]
     metrics: ParallelStateRootMetrics,
+
+    storage_root_cache: Option<StorageRootCache>,
 }
 
 impl<DB, Provider> AsyncStateRoot<DB, Provider> {
@@ -63,6 +87,14 @@ impl<DB, Provider> AsyncStateRoot<DB, Provider> {
             hashed_state,
             #[cfg(feature = "metrics")]
             metrics: ParallelStateRootMetrics::default(),
+            storage_root_cache: None,
+        }
+    }
+
+    pub fn with_storage_root_cache(self, storage_root_cache: StorageRootCache) -> Self {
+        Self {
+            storage_root_cache: Some(storage_root_cache),
+            ..self
         }
     }
 }
@@ -107,10 +139,18 @@ where
             let hashed_state_sorted = hashed_state_sorted.clone();
             #[cfg(feature = "metrics")]
             let metrics = self.metrics.storage_trie.clone();
+            let storage_root_cache = self.storage_root_cache.clone();
             let handle =
                 self.blocking_pool.spawn_fifo(move || -> Result<_, AsyncStateRootError> {
+                    if let Some(cache) = &storage_root_cache {
+                        let key = hashed_state_sorted.fast_unique_hash_account(hashed_address);
+                        if let Some(res) = cache.get(key) {
+                            return Ok(res);
+                        }
+                    }
+
                     let provider = view.provider_ro()?;
-                    Ok(StorageRoot::new_hashed(
+                    let res = StorageRoot::new_hashed(
                         provider.tx_ref(),
                         HashedPostStateCursorFactory::new(provider.tx_ref(), &hashed_state_sorted),
                         hashed_address,
@@ -118,7 +158,14 @@ where
                         metrics,
                     )
                     .with_prefix_set(prefix_set)
-                    .calculate(retain_updates)?)
+                    .calculate(retain_updates)?;
+
+                    if let Some(cache) = &storage_root_cache {
+                        let key = hashed_state_sorted.fast_unique_hash_account(hashed_address);
+                        cache.set(key, res.clone());
+                    }
+
+                    Ok(res)
                 });
             storage_roots.insert(hashed_address, handle);
         }

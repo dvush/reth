@@ -11,7 +11,7 @@ use std::ops::Deref;
 
 /// An Ethereum account.
 #[main_codec]
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default, Hash)]
 pub struct Account {
     /// Account nonce.
     pub nonce: u64,
