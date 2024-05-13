@@ -24,3 +24,4 @@ pub mod parallel_root;
 /// Parallel state root metrics.
 #[cfg(feature = "metrics")]
 pub mod metrics;
+pub mod cached_cursors;

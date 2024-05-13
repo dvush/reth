@@ -16,6 +16,7 @@ use std::time::Instant;
 use thiserror::Error;
 use tracing::*;
 use reth_trie::prefix_set::PrefixSet;
+use crate::cached_cursors::{CachedHashedCursorFactory, CursorCache};
 
 #[cfg(feature = "metrics")]
 use crate::metrics::ParallelStateRootMetrics;
@@ -23,12 +24,14 @@ use crate::metrics::ParallelStateRootMetrics;
 #[derive(Debug, Clone)]
 pub struct StorageRootCache {
     account_hash_results: Arc<Mutex<HashMap<u64, (B256, usize, TrieUpdates)>>>,
+    cursor_cache: CursorCache,
 }
 
 impl Default for StorageRootCache {
     fn default() -> Self {
         Self {
             account_hash_results: Arc::new(Mutex::new(HashMap::new())),
+            cursor_cache: Default::default(),
         }
     }
 }
@@ -180,7 +183,8 @@ where
 
         let provider_ro = self.view.provider_ro()?;
         let tx = provider_ro.tx_ref();
-        let hashed_cursor_factory = HashedPostStateCursorFactory::new(tx, &hashed_state_sorted);
+        let cached_cf = CachedHashedCursorFactory::from_cache(self.storage_root_cache.map(|c| c.cursor_cache.hashed_cursor.clone()).unwrap_or_default(), tx);
+        let hashed_cursor_factory = HashedPostStateCursorFactory::new(cached_cf, &hashed_state_sorted);
         let trie_cursor_factory = tx;
 
         let trie_cursor =

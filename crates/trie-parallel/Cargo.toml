@@ -41,6 +41,8 @@ rayon = { workspace = true, optional = true }
 reth-metrics = { workspace = true, optional = true }
 metrics = { workspace = true, optional = true }
 
+ahash = "0.8.11"
+
 [dev-dependencies]
 # reth
 reth-primitives = { workspace = true, features = ["test-utils", "arbitrary"] }
